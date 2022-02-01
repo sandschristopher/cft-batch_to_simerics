@@ -1,12 +1,13 @@
 from email.mime import base
 import shutil
+from unittest import result
 import numpy as np
 import re
 import csv
 import os
 import subprocess
 from math import radians
-from modify_spro import *
+from modify_spro import *                                                       
 
 '''
 Takes .txt file filled with parameter values and converts it into a numpy array (column vector is one geometry variation).
@@ -279,7 +280,7 @@ def run_simerics_batch(simerics_batch_file, output_folder, base_name):
         batch_path = os.path.abspath(simerics_batch_file)
         subprocess.call(batch_path)
 
-    return spro_files, stage_components
+    return spro_files
 
 '''
 Averages the each .sres file results and places the values in .csv file.
@@ -342,6 +343,7 @@ def post_process(spro_files, output_folder, base_name, avgWindow):
             if var not in order:
                 order.append(var)
         order_dict = {k: formatted_result_Dict[k] for k in order}
+        print(result_Dict)
         with open ('results.csv', 'a+', newline='') as outfile:                             
             writer = csv.DictWriter(outfile, fieldnames=order_dict.keys(), delimiter=",")             
             if spro == spro_files[0]:                                                        
@@ -349,7 +351,7 @@ def post_process(spro_files, output_folder, base_name, avgWindow):
                 writer.writeheader()
                 writer.writerow(units_Dict)
                 writer.writerow(desc_Dict)                                                                    
-            writer.writerow(result_Dict)
+            writer.writerow(formatted_result_Dict)
 
     return 0
 
@@ -386,14 +388,23 @@ def organize_file_structure(variations, output_folder, base_name):
     return 0
 
 def main():
-    values_array = txt_to_np("HT_single_stage2.txt", ",")
-    variables, units, components = make_template("HT_single_stage2.cft-batch", "template.cft-batch")
-    base_name = "Design"
-    output_folder = "Output"
-    variations = make_variations("HT_single_stage2.cft-batch", "template.cft-batch", variables, units, components, values_array, output_folder, base_name)
-    make_batch("HT_single_stage2.bat", variations, output_folder)
-    spro_files, stage_components = run_simerics_batch("HT_single_stage2_simerics.bat", output_folder, base_name)
-    post_process(spro_files, output_folder, base_name, 50)
-    organize_file_structure(variations, output_folder, base_name)
+    '''
+    User inputs:
+    text_file [string] = name of .txt file that holds the design parameter values
+    '''
+    base_file_name = "HT_single_stage2"
+    delimiter = ","
+    steady_avg_window = 50
+    
+    '''
+
+    '''
+    values_array = txt_to_np(base_file_name + ".txt", delimiter)
+    variables, units, components = make_template(base_file_name + ".cft-batch", "template.cft-batch")
+    variations = make_variations(base_file_name + ".cft-batch", "template.cft-batch", variables, units, components, values_array, "Output", "Design")
+    make_batch(base_file_name + ".bat", variations, "Output")
+    spro_files = run_simerics_batch(base_file_name + "_simerics.bat", "Output", "Design")
+    post_process(spro_files, "Output", "Design", steady_avg_window)
+    organize_file_structure(variations, "Output", "Design")
 
 main()
