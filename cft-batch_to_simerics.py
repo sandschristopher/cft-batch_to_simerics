@@ -1,5 +1,4 @@
 from email.mime import base
-from multiprocessing import parent_process
 import shutil
 import numpy as np
 import re
@@ -7,7 +6,7 @@ import csv
 import os
 import subprocess
 from math import radians
-from modify_spro import modify_spro
+from modify_spro import *
 
 '''
 Takes .txt file filled with parameter values and converts it into a numpy array (column vector is one geometry variation).
@@ -257,11 +256,11 @@ def run_simerics_batch(simerics_batch_file, output_folder, base_name):
         
     spro_files = sorted(spro_files, key=lambda file: int(re.search(base_name + "(\d+)", file).group(1)))
 
-    if not os.path.exists(os.path.join(os.path.abspath(output_folder), base_name + "0.sres")):
+    stage_components = []
+    stage_components.append(int(input("Enter the number associated with the initial stage component: ")))
+    stage_components.append(int(input("Enter the number associated with the final stage component: ")))
 
-        stage_components = []
-        stage_components.append(int(input("Enter the number associated with the initial stage component: ")))
-        stage_components.append(int(input("Enter the number associated with the final stage component: ")))
+    if not os.path.exists(os.path.join(os.path.abspath(output_folder), base_name + "0.sres")):
 
         for spro in spro_files:
             shutil.move(os.path.join(os.path.abspath(output_folder), spro), os.path.join(os.path.abspath(os.path.join(os.path.abspath(spro), os.pardir)), spro))
@@ -280,7 +279,7 @@ def run_simerics_batch(simerics_batch_file, output_folder, base_name):
         batch_path = os.path.abspath(simerics_batch_file)
         subprocess.call(batch_path)
 
-    return spro_files
+    return spro_files, stage_components
 
 '''
 Averages the each .sres file results and places the values in .csv file.
@@ -301,19 +300,19 @@ def post_process(spro_files, output_folder, base_name, avgWindow):
                     vflow_out = float(line.split("=")[1])
                     continue
                 if "Omega" in line:
+                    impeller_Number = re.search("Omega(\d) = ", line).group(1)
                     rpm = float(line.split("=")[1])*9.5493
                     break
 
         integral_file = spro.split(".")[0] + "_integrals.txt"
 
         result_Dict = {}
+        formatted_result_Dict = {}
+        units_Dict, desc_Dict = get_Dicts(output_folder + "\\" +  spro)
         with open (output_folder + "\\" + integral_file, 'r') as infile:                                   
             result_List = list(infile)                                                                  
             del result_List[1:-avgWindow]                                  
             reader = csv.DictReader(result_List, delimiter="\t")
-            result_Dict[base_name] = index
-            result_Dict['vflow_out'] = vflow_out
-            result_Dict['rpm'] = rpm
             for row in reader:
                 for key, value in row.items():
                     if 'userdef.' in key:                                                               
@@ -321,15 +320,35 @@ def post_process(spro_files, output_folder, base_name, avgWindow):
                             result_Dict[key] += float(value)                              
                         else:
                             result_Dict[key] = float(value)
+            formatted_result_Dict[base_name] = index
+            units_Dict[base_name] = '-'
+            desc_Dict[base_name] = ' '
+            formatted_result_Dict['vflow_out'] = vflow_out
+            units_Dict['vflow_out'] = '[m3/s]'
+            desc_Dict['vflow_out'] = 'Outlet volumetric flux'
+            formatted_result_Dict['Revolutions'] = rpm
+            units_Dict['Revolutions'] = '[rpm]'
+            desc_Dict['Revolutions'] = 'Outlet volumetric flux'
             for key, value in result_Dict.items():
-                if key != base_name and key != 'vflow_out' and key != 'rpm':
-                    result_Dict[key] = result_Dict[key] / avgWindow
-
+                if 'userdef.' in key:
+                    if "DPtt" + impeller_Number in key:
+                        formatted_result_Dict['DPtt_imp'] = result_Dict[key]/avgWindow  
+                    elif "Eff_tt_" + impeller_Number in key:
+                        formatted_result_Dict['Eff_tt_imp'] = result_Dict[key]/(avgWindow)    
+                    else:
+                        formatted_result_Dict[key[8:]] = result_Dict[key]/(avgWindow)                              
+        order = [base_name, 'Revolutions', 'vflow_out', 'DPtt', 'DPtt_stage', 'DPtt_imp', 'Eff_tt', 'Eff_tt_stage', 'Eff_tt_imp', 'PC' + impeller_Number, 'Torque' + impeller_Number, 'H', 'H' + impeller_Number,]
+        for var in formatted_result_Dict.keys():
+            if var not in order:
+                order.append(var)
+        order_dict = {k: formatted_result_Dict[k] for k in order}
         with open ('results.csv', 'a+', newline='') as outfile:                             
-            writer = csv.DictWriter(outfile, fieldnames=result_Dict.keys(), delimiter=",")             
+            writer = csv.DictWriter(outfile, fieldnames=order_dict.keys(), delimiter=",")             
             if spro == spro_files[0]:                                                        
                 outfile.truncate(0)
-                writer.writeheader()                                                                    
+                writer.writeheader()
+                writer.writerow(units_Dict)
+                writer.writerow(desc_Dict)                                                                    
             writer.writerow(result_Dict)
 
     return 0
@@ -373,7 +392,7 @@ def main():
     output_folder = "Output"
     variations = make_variations("HT_single_stage2.cft-batch", "template.cft-batch", variables, units, components, values_array, output_folder, base_name)
     make_batch("HT_single_stage2.bat", variations, output_folder)
-    spro_files = run_simerics_batch("HT_single_stage2_simerics.bat", output_folder, base_name)
+    spro_files, stage_components = run_simerics_batch("HT_single_stage2_simerics.bat", output_folder, base_name)
     post_process(spro_files, output_folder, base_name, 50)
     organize_file_structure(variations, output_folder, base_name)
 

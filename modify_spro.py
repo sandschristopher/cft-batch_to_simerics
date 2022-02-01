@@ -51,19 +51,18 @@ def modify_spro(spro_file, stage_components):
             if "#Outlet" in line:
                 indent = " " * (len(line) - len(line.lstrip(" ")))
                 break
-     
-    # Ensure grid file consistency between steady-state and transient simulations
+
+    # Ensures consistent .sgrd file:
     with open(spro_file, 'r') as infile:
         data = infile.readlines()
         for line_number, line in enumerate(data):
             if ".sgrd" in line:
                 data[line_number] = line.replace("transient", "steady")
                 break
-     
+    
     with open(spro_file, 'w') as outfile:
         data = "".join(data)
         outfile.write(data)
-        
     
     def insert_line(addition):
 
@@ -91,11 +90,11 @@ def modify_spro(spro_file, stage_components):
 
     insert_line(indent + "#head, imp1 [m]" + "\n" + indent + "plot.H = plot.DPtt" + impeller_number + "/rho/9.81 \n" + indent + "#plot.H:head, imp1 [m]")
     
-    insert_line(indent + "#delta p (t-t), stage [Pa]" + "\n" + indent + "plot.DPtts = flow.mpt@\"" \
-        + CVs[stage_components[-1]] + "\" - flow.mpt@\"" + CVs[(stage_components[0] - 1)] + "\"\n" + indent + "#plot.DPtts:delta p (t-t), stage [Pa]")
+    insert_line(indent + "#delta p (t-t), stage [Pa]" + "\n" + indent + "plot.DPtt_stage = flow.mpt@\"" \
+        + CVs[stage_components[-1]] + "\" - flow.mpt@\"" + CVs[(stage_components[0] - 1)] + "\"\n" + indent + "#plot.DPtt_stage:delta p (t-t), stage [Pa]")
     
-    insert_line(indent + "#efficiency (t-t), stage [-]" + "\n" + indent + "plot.Eff_tts = flow.q@\"" \
-        + CVs[stage_components[-1]] + "\"*plot.DPtts/rho/plot.PC" + impeller_number + "\n" + indent + "#plot.Eff_tts:efficiency (t-t), stage [-]")
+    insert_line(indent + "#efficiency (t-t), stage [-]" + "\n" + indent + "plot.Eff_tt_stage = flow.q@\"" \
+        + CVs[stage_components[-1]] + "\"*plot.DPtt_stage/rho/plot.PC" + impeller_number + "\n" + indent + "#plot.Eff_tt_stage:efficiency (t-t), stage [-]")
 
     for i in range(1, len(CVs)):
         insert_line(indent + "#delta p (t-t), CV" + str(i) + " [Pa]" + "\n" + indent + "plot.DPttCV" + str(i) + " = flow.mpt@\"" \
@@ -137,3 +136,27 @@ def modify_spro(spro_file, stage_components):
             + CVs[-1] + "\"\n" + indent + "#plot.vOutletExtension:#volumetric flow, OutletExtension, absolute [m3/s]")
 
     return 0
+
+def get_Dicts(spro_file):
+
+    with open(spro_file, 'r') as infile:
+        for line in infile.readlines():
+            if "Omega" in line:
+                impeller_number = line.split("=")[0].strip()[-1]
+                break
+
+    with open(spro_file, "r") as infile:
+        units_Dict = {}
+        desc_Dict = {}
+        data = infile.readlines()
+        for line in data:
+            if "#plot." in line:
+                key = line.split(":")[0].split(".")[1].strip()
+                if key == "DPtt" + impeller_number:
+                    key = "DPtt_imp"
+                if key == "Eff_tt_" + impeller_number + "_i":
+                    key = "Eff_tt_imp"
+                units_Dict[key] = line.split(" ")[-1].strip() 
+                desc_Dict[key] = line.split("[")[0].split(":")[1].strip()
+
+    return units_Dict, desc_Dict
