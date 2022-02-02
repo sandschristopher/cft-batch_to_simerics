@@ -390,7 +390,9 @@ def organize_file_structure(variations, output_folder, base_name):
 def main():
     '''
     User inputs:
-    text_file [string] = name of .txt file that holds the design parameter values
+    base_file_name [string] = name of .txt file that holds the design parameter values
+    delimiter [string] = delimiter used to partition the design parameter values within the .txt file
+    steady_avg_window [int] = number of iterations used to average the user defined expressions within the intgrals files
     '''
     base_file_name = "HT_single_stage2"
     delimiter = ","
