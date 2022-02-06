@@ -1,12 +1,13 @@
-from email.mime import base
+from audioop import avgpp
+from genericpath import isdir
 import shutil
-from unittest import result
 import numpy as np
 import re
 import csv
 import os
 import subprocess
 from math import radians
+import pandas as pd
 from modify_spro import *                                                       
 
 '''
@@ -142,13 +143,12 @@ variables [list] = variable names associated with the manipulated geometry param
 units [list] = variable units associated with the manipulated geometry parameters
 components [list] = component names listed within the .cft-batch file
 values_array [np.array] = np.array of geometry parameter values
-output_folder [string] = name of output folder containing the resulting geometry variations
 base_name [string] = base name of folder containing .stp files
 
 Outputs:
 variations [list] = list of variation file names
 '''
-def make_variations(cft_batch_file, template_file, variables, units, components, values_array, output_folder, base_name):
+def make_variations(cft_batch_file, template_file, variables, units, components, values_array, base_name):
 
     original_values = [[] for i in range(len(units))]
 
@@ -169,8 +169,6 @@ def make_variations(cft_batch_file, template_file, variables, units, components,
 
     for i, column in enumerate(entire_values_array.T):
 
-        new_file = base_name + str(i) + ".cft-batch"
-
         with open(template_file, "r") as template:
             data = template.readlines()
 
@@ -187,14 +185,19 @@ def make_variations(cft_batch_file, template_file, variables, units, components,
                         break
 
             for line_number, line in enumerate(data):
+                '''
                 if "<WorkingDir>" in line:
                     old_directory = re.search("<WorkingDir>(.*)</WorkingDir>", line).group(1)
                     new_directory = ".\\" + output_folder + "\\"
                     data[line_number] = line.replace(old_directory, new_directory)
+                '''
 
                 if "<BaseFileName>" in line:
                     old_name = re.search("<BaseFileName>(.*)</BaseFileName>", line).group(1)
-                    data[line_number] = line.replace(old_name, base_name + str(i))
+                    solver_type = old_name.split("_")[-1]
+                    data[line_number] = line.replace(old_name, base_name + str(i) + "_" + solver_type)
+
+            new_file = base_name + str(i) + "_" + solver_type + ".cft-batch"
 
             with open(new_file, "w+") as new:
                 new.writelines(data)
@@ -213,9 +216,8 @@ Places each variation into a .bat file then runs .bat file to create respective 
 Inputs:
 cft_batch_file [string] = output .bat file (CFturbo)
 variations [list] = variation file names
-output_folder [string] = name of output folder containing the resulting geometry variations
 '''
-def make_batch(cft_bat_file, variations, output_folder):
+def make_batch(cft_bat_file, variations):
     
     with open(cft_bat_file, "a+") as batch:
         for index, variation in enumerate(variations):
@@ -227,8 +229,8 @@ def make_batch(cft_bat_file, variations, output_folder):
         batch.close()
 
     batch_path = os.path.abspath(cft_bat_file)
-    output_path = os.path.abspath(output_folder)
-    if not os.path.exists(output_path):
+    spro_path = os.path.abspath(variations[0].split("_")[0])
+    if not os.path.exists(spro_path):
         subprocess.call(batch_path)
 
     return 0
@@ -246,41 +248,70 @@ base_name [string] = base name of folder containing .stp files
 Outputs:
 spro_files [list] = .spro files
 '''
-def run_simerics_batch(simerics_batch_file, output_folder, base_name):
+def run_simerics_batch(run_transient, simerics_batch_file, base_name):
 
-    spro_files = []
-    output_path = os.path.abspath(output_folder)
+    spro_steady_files = []
+    spro_transient_files = []
+    parent_path = os.getcwd()
 
-    for file in os.listdir(output_path):
-        if ".spro" in file:
-            spro_files.append(file)
+    for file in os.listdir(parent_path):
+        if ".spro" in file and "steady" in file:
+            spro_steady_files.append(file)
+        if ".spro" in file and "transient" in file:
+            spro_transient_files.append(file)
         
-    spro_files = sorted(spro_files, key=lambda file: int(re.search(base_name + "(\d+)", file).group(1)))
+    spro_steady_files = sorted(spro_steady_files, key=lambda file: int(re.search(base_name + "(\d+)", file).group(1)))
+    spro_transient_files = sorted(spro_transient_files, key=lambda file: int(re.search(base_name + "(\d+)", file).group(1)))
 
     stage_components = []
     stage_components.append(int(input("Enter the number associated with the initial stage component: ")))
     stage_components.append(int(input("Enter the number associated with the final stage component: ")))
 
-    if not os.path.exists(os.path.join(os.path.abspath(output_folder), base_name + "0.sres")):
+    if not os.path.exists(base_name + "0"):
 
-        for spro in spro_files:
-            shutil.move(os.path.join(os.path.abspath(output_folder), spro), os.path.join(os.path.abspath(os.path.join(os.path.abspath(spro), os.pardir)), spro))
+        for spro in spro_steady_files:
             modify_spro(spro, stage_components)
-            shutil.move(os.path.abspath(spro), os.path.join(os.path.abspath(output_folder), spro))
 
             with open(simerics_batch_file, "a+") as batch:
-                for index, spro in enumerate(spro_files):
+                for index, spro in enumerate(spro_steady_files):
                     if index == 0:
                         batch.truncate(0)
+                    
+                    batch.write("\"C:\Program Files\Simerics\SimericsMP.exe\" -run \"" + spro + "\"\n")
 
-                    batch.write("\"C:\Program Files\Simerics\SimericsMP.exe\" -run \"" + output_folder + "\\" + spro + "\"\n")
-            
                 batch.close()
 
         batch_path = os.path.abspath(simerics_batch_file)
         subprocess.call(batch_path)
 
-    return spro_files
+    if run_transient == True and not os.path.exists(base_name + "0"):
+
+        print(base_name + "0")
+
+        for spro in spro_transient_files:
+            modify_spro(spro, stage_components)
+
+            with open(simerics_batch_file, "a+") as batch:
+                for index, spro in enumerate(spro_transient_files):
+                    if index == 0:
+                        batch.truncate(0)
+
+                    batch.write("\"C:\Program Files\Simerics\SimericsMP.exe\" -run \"" + spro + "\" " + "\"" + spro_steady_files[index].replace(".spro", ".sres") + "\"\n")
+                    
+                batch.close()
+
+        batch_path = os.path.abspath(simerics_batch_file)
+        subprocess.call(batch_path)
+
+        return spro_steady_files + spro_transient_files
+
+    elif run_transient == True and os.path.exists(base_name + "0"):
+        
+        return spro_steady_files + spro_transient_files
+    
+    else:
+        
+        return spro_steady_files
 
 '''
 Averages the each .sres file results and places the values in .csv file.
@@ -292,25 +323,36 @@ base_name [string] = base name of folder containing .stp files
 avgWindow [int] = number of iterations to calculate average values
 '''
 
-def post_process(spro_files, output_folder, base_name, avgWindow):
+def post_process(spro_files, base_name, steady_avg_window, transient_avg_window):
+    index = 0
+    for spro in spro_files:
+        if base_name + "0_transient" in spro:
+            index = 0
 
-    for index, spro in enumerate(spro_files):
-        with open (output_folder + "\\" +  spro, 'r') as infile:
+        with open (spro, 'r') as infile:
+
+            solver_type = spro.split(".")[0].split("_")[1]
+
+            if solver_type == "steady":
+                avgWindow = steady_avg_window
+            if solver_type == "transient":
+                avgWindow = transient_avg_window
+
             for line in infile.readlines():
                 if "vflow_out" in line:
                     vflow_out = float(line.split("=")[1])
                     continue
                 if "Omega" in line:
                     impeller_Number = re.search("Omega(\d) = ", line).group(1)
-                    rpm = float(line.split("=")[1])*9.5493
+                    rpm = round(float(line.split("=")[1])*9.5493)
                     break
 
         integral_file = spro.split(".")[0] + "_integrals.txt"
 
         result_Dict = {}
         formatted_result_Dict = {}
-        units_Dict, desc_Dict = get_Dicts(output_folder + "\\" +  spro)
-        with open (output_folder + "\\" + integral_file, 'r') as infile:                                   
+        units_Dict, desc_Dict = get_Dicts(spro)
+        with open (integral_file, 'r') as infile:                                   
             result_List = list(infile)                                                                  
             del result_List[1:-avgWindow]                                  
             reader = csv.DictReader(result_List, delimiter="\t")
@@ -323,7 +365,7 @@ def post_process(spro_files, output_folder, base_name, avgWindow):
                             result_Dict[key] = float(value)
             formatted_result_Dict[base_name] = index
             units_Dict[base_name] = '-'
-            desc_Dict[base_name] = ' '
+            desc_Dict[base_name] = '-'
             formatted_result_Dict['vflow_out'] = vflow_out
             units_Dict['vflow_out'] = '[m3/s]'
             desc_Dict['vflow_out'] = 'Outlet volumetric flux'
@@ -343,15 +385,34 @@ def post_process(spro_files, output_folder, base_name, avgWindow):
             if var not in order:
                 order.append(var)
         order_dict = {k: formatted_result_Dict[k] for k in order}
-        print(result_Dict)
-        with open ('results.csv', 'a+', newline='') as outfile:                             
+        with open ('results_' + solver_type + '.csv', 'a+', newline='') as outfile:                             
             writer = csv.DictWriter(outfile, fieldnames=order_dict.keys(), delimiter=",")             
-            if spro == spro_files[0]:                                                        
+            if index == 0:                                                        
                 outfile.truncate(0)
                 writer.writeheader()
                 writer.writerow(units_Dict)
                 writer.writerow(desc_Dict)                                                                    
             writer.writerow(formatted_result_Dict)
+
+        index = index + 1
+
+    return 0
+
+def combine_csv(base_file_name):
+
+    parent_path = os.getcwd()
+    csv_files = []
+
+    for file in os.listdir(parent_path):
+        if 'results' in file and '.csv' in file:
+            csv_files.append(file)
+
+    writer = pd.ExcelWriter(base_file_name + '_results.xlsx', engine='xlsxwriter', engine_kwargs={'options': {'strings_to_numbers': True}})
+    for csv in csv_files:
+        solver_type = csv.split(".")[0].split("_")[-1]
+        df = pd.read_csv(csv)
+        df.to_excel(writer, sheet_name=solver_type, index=False)
+    writer.save()
 
     return 0
 
@@ -364,27 +425,36 @@ output_folder [string] = name of output folder containing the resulting geometry
 base_name [string] = base name of folder containing .stp files
 '''
 
-def organize_file_structure(variations, output_folder, base_name):
+def organize_file_structure(variations, base_name):
 
-    output_path = os.path.abspath(output_folder)
-    parent_path = os.path.dirname(output_path)
+    parent_path = os.getcwd()
 
     for index in range(len(variations)):
-        new_path = os.path.join(output_folder, os.path.join(base_name + str(index)))
-        if not os.path.exists(new_path):
-            os.mkdir(os.path.join(output_folder, os.path.join(base_name + str(index))))
-            for file in os.listdir(output_path):
-                if re.match(base_name + "(\d+)", file).group(1) == str(index):
-                    old_path = os.path.join(output_path, file)
-                    shutil.move(old_path, new_path)
-    
         for file in os.listdir(parent_path):
             if base_name in file:
-                if re.match(base_name + "(\d+)", file).group(1) == str(index):
+                if re.match(base_name + "(\d+)", file).group(1) == str(index) and not os.path.isdir(file) and "steady" in file:
                     old_path = os.path.join(parent_path, file)
-                    new_path = os.path.join(output_path, os.path.join(base_name + str(index), file))
+                    design_folder = os.path.join(parent_path, base_name + str(index))
+                    if not os.path.exists(design_folder):
+                        os.makedirs(design_folder)
+                    steady_folder = os.path.join(design_folder, "steady")
+                    if not os.path.exists(steady_folder):
+                        os.makedirs(steady_folder)
+                    new_path = os.path.join(steady_folder, file)        
                     shutil.move(old_path, new_path)
-            
+                
+                if re.match(base_name + "(\d+)", file).group(1) == str(index) and not os.path.isdir(file) and "transient" in file:
+                    old_path = os.path.join(parent_path, file)
+                    design_folder = os.path.join(parent_path, base_name + str(index))
+                    if not os.path.exists(design_folder):
+                        os.makedirs(design_folder)
+                    steady_folder = os.path.join(design_folder, "transient")
+                    if not os.path.exists(steady_folder):
+                        os.makedirs(steady_folder)
+                    new_path = os.path.join(steady_folder, file)        
+                    shutil.move(old_path, new_path)
+
+                   
     return 0
 
 def main():
@@ -394,19 +464,24 @@ def main():
     delimiter [string] = delimiter used to partition the design parameter values within the .txt file
     steady_avg_window [int] = number of iterations used to average the user defined expressions within the intgrals files
     '''
-    base_file_name = "HT_single_stage2"
+    base_file_name = "AFnq109"
     delimiter = ","
-    steady_avg_window = 50
-    
-    '''
-
-    '''
+    steady_avg_window = 5
+    run_transient = False
+    transient_avg_window = 120
+ 
     values_array = txt_to_np(base_file_name + ".txt", delimiter)
-    variables, units, components = make_template(base_file_name + ".cft-batch", "template.cft-batch")
-    variations = make_variations(base_file_name + ".cft-batch", "template.cft-batch", variables, units, components, values_array, "Output", "Design")
-    make_batch(base_file_name + ".bat", variations, "Output")
-    spro_files = run_simerics_batch(base_file_name + "_simerics.bat", "Output", "Design")
-    post_process(spro_files, "Output", "Design", steady_avg_window)
-    organize_file_structure(variations, "Output", "Design")
+    variables, units, components = make_template(base_file_name + "_steady.cft-batch", "template_steady.cft-batch")
+    variations = make_variations(base_file_name + "_steady.cft-batch", "template_steady.cft-batch", variables, units, components, values_array, "Design")
+
+    if run_transient == True:
+        variables, units, components = make_template(base_file_name + "_transient.cft-batch", "template_transient.cft-batch")
+        variations = variations + make_variations(base_file_name + "_transient.cft-batch", "template_transient.cft-batch", variables, units, components, values_array, "Design")
+
+    make_batch(base_file_name + ".bat", variations)
+    spro_files = run_simerics_batch(run_transient, base_file_name + "_simerics.bat", "Design")
+    post_process(spro_files, "Design", steady_avg_window, transient_avg_window)
+    combine_csv(base_file_name)
+    organize_file_structure(variations, "Design")
 
 main()

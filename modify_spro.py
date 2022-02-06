@@ -88,7 +88,7 @@ def modify_spro(spro_file, stage_components):
 
     insert_line(indent + "#head [m]" + "\n" + indent + "plot.H = plot.DPtt/rho/9.81 \n" + indent + "#plot.H:head [m]")
 
-    insert_line(indent + "#head, imp1 [m]" + "\n" + indent + "plot.H = plot.DPtt" + impeller_number + "/rho/9.81 \n" + indent + "#plot.H:head, imp1 [m]")
+    insert_line(indent + "#head, imp1 [m]" + "\n" + indent + "plot.H" + impeller_number + " = plot.DPtt" + impeller_number + "/rho/9.81 \n" + indent + "#plot.H" + impeller_number + ":head, imp1 [m]")
     
     insert_line(indent + "#delta p (t-t), stage [Pa]" + "\n" + indent + "plot.DPtt_stage = flow.mpt@\"" \
         + CVs[stage_components[-1]] + "\" - flow.mpt@\"" + CVs[(stage_components[0] - 1)] + "\"\n" + indent + "#plot.DPtt_stage:delta p (t-t), stage [Pa]")
